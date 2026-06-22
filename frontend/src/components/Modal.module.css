@@ -1,0 +1,5 @@
+.backdrop{position:fixed;inset:0;z-index:var(--z-modal);display:grid;place-items:center;padding:20px;background:rgba(13,27,42,.62)}
+.card{width:min(100%,640px);max-height:calc(100vh - 40px);overflow:auto;padding:24px;border-radius:var(--radius-modal);outline:none;background:#fff;box-shadow:var(--shadow-modal)}
+.header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid var(--color-primary)}
+.header h2{margin:0;color:var(--color-text-strong);font-size:1.2rem}.header button{width:40px;height:40px;border:0;border-radius:8px;background:transparent;color:var(--color-text-muted);font-size:1.6rem;cursor:pointer}.header button:hover{background:var(--color-surface-muted);color:var(--color-text-strong)}
+@media(max-width:560px){.backdrop{padding:0}.card{min-height:100vh;max-height:100vh;border-radius:0;padding:18px}}

@@ -1,0 +1,1 @@
+.form{display:flex;flex-direction:column;gap:18px}.actions{display:flex;justify-content:flex-end;gap:10px;padding-top:6px}.error{color:var(--color-error-text);font-size:.78rem;font-weight:600}.form [aria-invalid="true"]{border-color:var(--color-error-text)}

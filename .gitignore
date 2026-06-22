@@ -1,0 +1,40 @@
+# .NET build and local tool state
+**/bin/
+**/obj/
+.dotnet-home/
+.nuget/
+.npm-cache/
+**/.npm-cache/
+.config/dotnet-tools.json
+.tools/
+.appdata/
+TestResults/
+*.user
+*.suo
+
+# Frontend output and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Secrets and local environment overrides
+.env
+.env.*
+!.env.example
+!**/.env.example
+**/appsettings.Local.json
+**/appsettings.*.local.json
+secrets.json
+
+# Managed runtime data and logs
+app-data/*
+!app-data/.gitkeep
+logs/
+*.log
+
+# Editor and operating-system files
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
