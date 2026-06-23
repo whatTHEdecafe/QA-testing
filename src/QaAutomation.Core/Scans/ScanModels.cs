@@ -23,6 +23,12 @@ public sealed class Scan
     public string BrowserName { get; set; } = "Chromium";
     public int ViewportWidth { get; set; }
     public int ViewportHeight { get; set; }
+    public int? OverallTimeoutSeconds { get; set; }
+    public int? NavigationTimeoutMilliseconds { get; set; }
+    public int? ActionTimeoutMilliseconds { get; set; }
+    public int? MaximumDetectedElements { get; set; }
+    public int? MaximumDiagnosticRecords { get; set; }
+    public int? ElementScreenshotPadding { get; set; }
     public int DetectedPageCount { get; set; }
     public int DetectedElementCount { get; set; }
     public int WarningCount { get; set; }
@@ -52,6 +58,8 @@ public sealed class ScannedPage
     public string? OriginalPageTitle { get; set; }
     public string? MainHeading { get; set; }
     public string GeneratedDisplayName { get; set; } = string.Empty;
+    public string? UserDisplayName { get; set; }
+    public DateTimeOffset? ReviewUpdatedAtUtc { get; set; }
     public int DiscoveryOrder { get; set; }
     public string? ScreenshotPath { get; set; }
     public string? ThumbnailPath { get; set; }
@@ -78,6 +86,11 @@ public sealed class DetectedElement
     public string? HtmlId { get; set; }
     public string? TestId { get; set; }
     public ElementClassification Classification { get; set; }
+    public string? UserDisplayName { get; set; }
+    public ElementClassification? ClassificationOverride { get; set; }
+    public DateTimeOffset? ReviewUpdatedAtUtc { get; set; }
+    public Guid? ManualPreferredSelectorCandidateId { get; set; }
+    public SelectorCandidate? ManualPreferredSelectorCandidate { get; set; }
     public bool IsActionable { get; set; }
     public bool IsVisible { get; set; }
     public bool IsEnabled { get; set; }

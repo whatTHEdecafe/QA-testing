@@ -12,14 +12,13 @@ namespace QaAutomation.Infrastructure.Scans;
 public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArtifactStorage storage,
     IOptions<ScannerOptions> configured, TimeProvider clock, ILogger<PlaywrightScanExecutor> logger) : IScanExecutor
 {
-    private readonly ScannerOptions _options = configured.Value;
-
     public async Task ExecuteAsync(Guid scanId, CancellationToken externalToken)
     {
         var scan = await db.Scans.Include(x => x.Target).SingleOrDefaultAsync(x => x.Id == scanId, externalToken);
         if (scan is null || !scan.IsActive) return;
+        var options = EffectiveOptions(scan);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(_options.OverallTimeoutSeconds));
+        timeout.CancelAfter(TimeSpan.FromSeconds(options.OverallTimeoutSeconds));
         var token = timeout.Token;
         var pending = new ConcurrentQueue<PendingDiagnostic>();
         IPlaywright? playwright = null; IBrowser? browser = null; IBrowserContext? context = null;
@@ -28,15 +27,15 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
             token.ThrowIfCancellationRequested(); scan.Start(clock.GetUtcNow()); await db.SaveChangesAsync(CancellationToken.None);
             var startUri = ScanUrlSafety.Validate(scan.StartingUrl, scan.Target.AllowedHost);
             playwright = await Playwright.CreateAsync();
-            browser = await playwright.Chromium.LaunchAsync(new() { Headless = _options.Headless });
+            browser = await playwright.Chromium.LaunchAsync(new() { Headless = options.Headless });
             using var cancellationRegistration = token.Register(() =>
             {
                 try { browser.CloseAsync().GetAwaiter().GetResult(); }
                 catch { /* The normal scan path records the resulting cancellation or browser error. */ }
             });
             await Stage(scan, "Opening isolated browser context");
-            context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = _options.ViewportWidth, Height = _options.ViewportHeight }, IgnoreHTTPSErrors = false });
-            context.SetDefaultTimeout(_options.ActionTimeoutMilliseconds); context.SetDefaultNavigationTimeout(_options.NavigationTimeoutMilliseconds);
+            context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = options.ViewportWidth, Height = options.ViewportHeight }, IgnoreHTTPSErrors = false });
+            context.SetDefaultTimeout(options.ActionTimeoutMilliseconds); context.SetDefaultNavigationTimeout(options.NavigationTimeoutMilliseconds);
             var page = await context.NewPageAsync(); AttachDiagnostics(page, pending);
             await page.RouteAsync("**/*", async route =>
             {
@@ -50,9 +49,9 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
             });
 
             await Stage(scan, "Navigating to authorized starting page");
-            await page.GotoAsync(startUri.AbsoluteUri, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = _options.NavigationTimeoutMilliseconds });
+            await page.GotoAsync(startUri.AbsoluteUri, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = options.NavigationTimeoutMilliseconds });
             token.ThrowIfCancellationRequested();
-            try { await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = Math.Min(5000, _options.ActionTimeoutMilliseconds) }); } catch (TimeoutException) { pending.Enqueue(new(DiagnosticCategory.ScannerWarning, DiagnosticSeverity.Warning, "Page remained network-active; scanning continued after the bounded wait.", RedactUrl(page.Url), null, null)); }
+            try { await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = Math.Min(5000, options.ActionTimeoutMilliseconds) }); } catch (TimeoutException) { pending.Enqueue(new(DiagnosticCategory.ScannerWarning, DiagnosticSeverity.Warning, "Page remained network-active; scanning continued after the bounded wait.", RedactUrl(page.Url), null, null)); }
             var finalUri = ScanUrlSafety.Validate(page.Url, scan.Target.AllowedHost);
             scan.FinalUrl = finalUri.AbsoluteUri; scan.PageTitle = Trim(await page.TitleAsync(), 500);
 
@@ -77,19 +76,19 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
 
             await Stage(scan, "Detecting visible page elements");
             var detected = await DetectElements(page);
-            if (detected.Count > _options.MaximumDetectedElements)
-                pending.Enqueue(new(DiagnosticCategory.ScannerWarning, DiagnosticSeverity.Warning, $"Element limit reached; only the first {_options.MaximumDetectedElements} useful elements were retained.", finalUri.AbsoluteUri, null, null));
+            if (detected.Count > options.MaximumDetectedElements)
+                pending.Enqueue(new(DiagnosticCategory.ScannerWarning, DiagnosticSeverity.Warning, $"Element limit reached; only the first {options.MaximumDetectedElements} useful elements were retained.", finalUri.AbsoluteUri, null, null));
             var discoveryOrder = 0;
-            foreach (var item in detected.Take(_options.MaximumDetectedElements))
+            foreach (var item in detected.Take(options.MaximumDetectedElements))
             {
                 token.ThrowIfCancellationRequested();
                 var element = MapElement(item, pageRecord.Id, ++discoveryOrder);
-                await CaptureCrop(page, scan.Id, item.ScanKey, element, pending);
+                await CaptureCrop(page, scan.Id, item.ScanKey, element, pending, options);
                 element.SelectorCandidates = await BuildSelectors(page, item, element.Id);
                 pageRecord.Elements.Add(element);
             }
             db.ScannedPages.Add(pageRecord); scan.DetectedPageCount = 1; scan.DetectedElementCount = pageRecord.Elements.Count;
-            FlushDiagnostics(scan, pending); scan.WarningCount = scan.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Warning); scan.ErrorCount = scan.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Error);
+            FlushDiagnostics(scan, pending, options); scan.WarningCount = scan.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Warning); scan.ErrorCount = scan.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Error);
             scan.Complete(clock.GetUtcNow()); await db.SaveChangesAsync(CancellationToken.None);
             await context.CloseAsync();
             logger.LogInformation("Scan {ScanId} completed with {ElementCount} elements", scan.Id, scan.DetectedElementCount);
@@ -97,14 +96,14 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
         catch (Exception ex) when (token.IsCancellationRequested || ex is OperationCanceledException || ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase) && externalToken.IsCancellationRequested)
         {
             db.ChangeTracker.Clear(); var terminal = await db.Scans.Include(x => x.Diagnostics).SingleAsync(x => x.Id == scanId, CancellationToken.None);
-            FlushDiagnostics(terminal, pending); if (terminal.IsActive) terminal.Cancel(clock.GetUtcNow(), externalToken.IsCancellationRequested ? "Cancelled by user" : "Scan timed out");
+            FlushDiagnostics(terminal, pending, EffectiveOptions(terminal)); if (terminal.IsActive) terminal.Cancel(clock.GetUtcNow(), externalToken.IsCancellationRequested ? "Cancelled by user" : "Scan timed out");
             await db.SaveChangesAsync(CancellationToken.None); logger.LogInformation("Scan {ScanId} cancelled", scanId);
         }
         catch (Exception ex)
         {
             pending.Enqueue(new(DiagnosticCategory.NavigationError, DiagnosticSeverity.Error, SafeMessage(ex), scan.FinalUrl ?? scan.StartingUrl, null, null));
             db.ChangeTracker.Clear(); var terminal = await db.Scans.Include(x => x.Diagnostics).SingleAsync(x => x.Id == scanId, CancellationToken.None);
-            FlushDiagnostics(terminal, pending); terminal.ErrorCount = terminal.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Error); terminal.WarningCount = terminal.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Warning);
+            FlushDiagnostics(terminal, pending, EffectiveOptions(terminal)); terminal.ErrorCount = terminal.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Error); terminal.WarningCount = terminal.Diagnostics.Count(x => x.Severity == DiagnosticSeverity.Warning);
             if (terminal.IsActive) terminal.Fail(clock.GetUtcNow(), SafeMessage(ex));
             await db.SaveChangesAsync(CancellationToken.None); logger.LogError(ex, "Scan {ScanId} failed", scanId);
         }
@@ -135,9 +134,9 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
         return JsonSerializer.Deserialize<List<ElementSnapshot>>(result.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
     }
 
-    private async Task CaptureCrop(IPage page, Guid scanId, string key, DetectedElement element, ConcurrentQueue<PendingDiagnostic> pending)
+    private async Task CaptureCrop(IPage page, Guid scanId, string key, DetectedElement element, ConcurrentQueue<PendingDiagnostic> pending, ScannerOptions options)
     {
-        try { var locator = page.Locator($"[data-qa-scan-key=\"{key}\"]"); await locator.ScrollIntoViewIfNeededAsync(); var box = await locator.BoundingBoxAsync() ?? throw new InvalidOperationException("Element bounding box is unavailable."); var bounds = await page.EvaluateAsync<Dimensions>("() => ({ width: Math.max(document.documentElement.scrollWidth, innerWidth), height: Math.max(document.documentElement.scrollHeight, innerHeight) })"); var pad = _options.ElementScreenshotPadding; var x = Math.Clamp(box.X - pad, 0, Math.Max(0, bounds.Width - 1)); var y = Math.Clamp(box.Y - pad, 0, Math.Max(0, bounds.Height - 1)); var width = Math.Clamp(box.Width + pad * 2, 1, Math.Max(1, bounds.Width - x)); var height = Math.Clamp(box.Height + pad * 2, 1, Math.Max(1, bounds.Height - y)); var relative = storage.GetRelativePath(scanId, $"element-{element.DiscoveryOrder:000}.png"); await page.ScreenshotAsync(new() { Path = storage.GetAbsoluteWritePath(relative), Clip = new() { X = (float)x, Y = (float)y, Width = (float)width, Height = (float)height }, Type = ScreenshotType.Png }); element.CropPath = relative; element.BoundingX = box.X; element.BoundingY = box.Y; element.BoundingWidth = box.Width; element.BoundingHeight = box.Height; }
+        try { var locator = page.Locator($"[data-qa-scan-key=\"{key}\"]"); await locator.ScrollIntoViewIfNeededAsync(); var box = await locator.BoundingBoxAsync() ?? throw new InvalidOperationException("Element bounding box is unavailable."); var bounds = await page.EvaluateAsync<Dimensions>("() => ({ width: Math.max(document.documentElement.scrollWidth, innerWidth), height: Math.max(document.documentElement.scrollHeight, innerHeight) })"); var pad = options.ElementScreenshotPadding; var x = Math.Clamp(box.X - pad, 0, Math.Max(0, bounds.Width - 1)); var y = Math.Clamp(box.Y - pad, 0, Math.Max(0, bounds.Height - 1)); var width = Math.Clamp(box.Width + pad * 2, 1, Math.Max(1, bounds.Width - x)); var height = Math.Clamp(box.Height + pad * 2, 1, Math.Max(1, bounds.Height - y)); var relative = storage.GetRelativePath(scanId, $"element-{element.DiscoveryOrder:000}.png"); await page.ScreenshotAsync(new() { Path = storage.GetAbsoluteWritePath(relative), Clip = new() { X = (float)x, Y = (float)y, Width = (float)width, Height = (float)height }, Type = ScreenshotType.Png }); element.CropPath = relative; element.BoundingX = box.X; element.BoundingY = box.Y; element.BoundingWidth = box.Width; element.BoundingHeight = box.Height; }
         catch (Exception ex) { element.ScreenshotError = SafeMessage(ex); pending.Enqueue(new(DiagnosticCategory.ScreenshotError, DiagnosticSeverity.Warning, $"Element {element.DiscoveryOrder} crop failed: {element.ScreenshotError}", null, null, null)); }
     }
 
@@ -161,7 +160,8 @@ public sealed class PlaywrightScanExecutor(QaAutomationDbContext db, IManagedArt
     private static ElementClassification Classify(ElementSnapshot x) { if (x.Destructive) return ElementClassification.PotentiallyDestructive; if (x.InputType == "file") return ElementClassification.Upload; if (x.InputType is "date" or "time" or "datetime-local") return ElementClassification.DateOrTime; if (x.InputType == "submit") return ElementClassification.Submission; if (x.TagName is "input" or "textarea" or "select" || x.Role is "textbox" or "checkbox" or "radio" or "combobox") return ElementClassification.Input; if (x.TagName == "a" || x.Role == "link") return ElementClassification.Navigational; if (x.TagName == "button" || x.Role is "button" or "tab") return ElementClassification.Action; return x.Actionable ? ElementClassification.UnknownCustomControl : ElementClassification.Informational; }
     private async Task CreateThumbnail(IBrowserContext context, byte[] bytes, string path) { var thumb = await context.NewPageAsync(); await thumb.SetViewportSizeAsync(400, 300); await thumb.SetContentAsync($"<style>body{{margin:0}}img{{display:block;width:360px;height:auto}}</style><img src='data:image/png;base64,{Convert.ToBase64String(bytes)}'>"); await thumb.Locator("img").ScreenshotAsync(new() { Path = path, Type = ScreenshotType.Png }); await thumb.CloseAsync(); }
     private async Task Stage(Scan scan, string stage) { scan.Stage = stage; await db.SaveChangesAsync(CancellationToken.None); }
-    private void FlushDiagnostics(Scan scan, ConcurrentQueue<PendingDiagnostic> pending) { while (scan.Diagnostics.Count < _options.MaximumDiagnosticRecords && pending.TryDequeue(out var d)) { var diagnostic=new ScanDiagnostic { Id=Guid.NewGuid(), ScanId=scan.Id, Category=d.Category, Severity=d.Severity, Message=Trim(d.Message,4000)!, Url=Trim(d.Url,2048), Method=Trim(d.Method,20), StatusCode=d.StatusCode, CreatedAtUtc=clock.GetUtcNow() }; scan.Diagnostics.Add(diagnostic); db.Entry(diagnostic).State=EntityState.Added; } }
+    private void FlushDiagnostics(Scan scan, ConcurrentQueue<PendingDiagnostic> pending, ScannerOptions options) { while (scan.Diagnostics.Count < options.MaximumDiagnosticRecords && pending.TryDequeue(out var d)) { var diagnostic=new ScanDiagnostic { Id=Guid.NewGuid(), ScanId=scan.Id, Category=d.Category, Severity=d.Severity, Message=Trim(d.Message,4000)!, Url=Trim(d.Url,2048), Method=Trim(d.Method,20), StatusCode=d.StatusCode, CreatedAtUtc=clock.GetUtcNow() }; scan.Diagnostics.Add(diagnostic); db.Entry(diagnostic).State=EntityState.Added; } }
+    private ScannerOptions EffectiveOptions(Scan scan) => new() { OverallTimeoutSeconds = scan.OverallTimeoutSeconds ?? configured.Value.OverallTimeoutSeconds, NavigationTimeoutMilliseconds = scan.NavigationTimeoutMilliseconds ?? configured.Value.NavigationTimeoutMilliseconds, ActionTimeoutMilliseconds = scan.ActionTimeoutMilliseconds ?? configured.Value.ActionTimeoutMilliseconds, MaximumDetectedElements = scan.MaximumDetectedElements ?? configured.Value.MaximumDetectedElements, MaximumDiagnosticRecords = scan.MaximumDiagnosticRecords ?? configured.Value.MaximumDiagnosticRecords, ElementScreenshotPadding = scan.ElementScreenshotPadding ?? configured.Value.ElementScreenshotPadding, ScreenshotDirectory = configured.Value.ScreenshotDirectory, Headless = configured.Value.Headless, ViewportWidth = scan.ViewportWidth, ViewportHeight = scan.ViewportHeight };
     private static bool IsAllowedRequest(string value, string host) { try { ScanUrlSafety.Validate(value, host); return true; } catch { return false; } }
     private static string? RedactUrl(string? value) { if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return null; return new UriBuilder(uri) { UserName="", Password="", Query=string.IsNullOrEmpty(uri.Query)?"":"?redacted" }.Uri.AbsoluteUri; }
     private static string GeneratePageName(ScannedPage p) => Trim(p.OriginalPageTitle,120) ?? Trim(p.MainHeading,120) ?? (string.IsNullOrWhiteSpace(p.Route.Trim('/')) ? "Home" : p.Route.Trim('/').Split('/').Last().Replace('-', ' '));

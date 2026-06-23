@@ -13,21 +13,21 @@ public sealed class ScanServiceTests
     public async Task Start_RejectsDisabledTarget()
     {
         await using var db=Database();var target=Target(false);db.Targets.Add(target);await db.SaveChangesAsync();
-        var service=Service(db,new ScanJobQueue());await Assert.ThrowsAsync<DomainValidationException>(()=>service.StartAsync(target.Id,CancellationToken.None));
+        var service=Service(db,new ScanJobQueue());await Assert.ThrowsAsync<DomainValidationException>(()=>service.StartAsync(target.Id,null,CancellationToken.None));
     }
 
     [Fact]
     public async Task Start_PreventsDuplicateActiveScans()
     {
         await using var db=Database();var target=Target(true);db.Targets.Add(target);await db.SaveChangesAsync();var service=Service(db,new ScanJobQueue());
-        await service.StartAsync(target.Id,CancellationToken.None);await Assert.ThrowsAsync<DomainValidationException>(()=>service.StartAsync(target.Id,CancellationToken.None));
+        await service.StartAsync(target.Id,null,CancellationToken.None);await Assert.ThrowsAsync<DomainValidationException>(()=>service.StartAsync(target.Id,null,CancellationToken.None));
     }
 
     [Fact]
     public async Task Cancel_QueuedScan_PersistsCancelledTerminalState()
     {
         await using var db=Database();var target=Target(true);db.Targets.Add(target);await db.SaveChangesAsync();var service=Service(db,new ScanJobQueue());
-        var queued=await service.StartAsync(target.Id,CancellationToken.None);var result=await service.CancelAsync(queued.Id,CancellationToken.None);
+        var queued=await service.StartAsync(target.Id,null,CancellationToken.None);var result=await service.CancelAsync(queued.Id,CancellationToken.None);
         Assert.Equal(ScanCancellationOutcome.CancellationRequested,result.Outcome);Assert.Equal(ScanStatus.Cancelled,result.Scan!.Status);Assert.Equal(ScanStatus.Cancelled,(await db.Scans.FindAsync(queued.Id))!.Status);
     }
 
@@ -77,7 +77,7 @@ public sealed class ScanServiceTests
     public async Task Recovery_PersistsInterruptedScansAsFailed()
     {
         await using var db=Database();var target=Target(true);db.Targets.Add(target);await db.SaveChangesAsync();var service=Service(db,new ScanJobQueue());
-        var interrupted=await service.StartAsync(target.Id,CancellationToken.None);Assert.Equal(1,await service.RecoverInterruptedAsync(CancellationToken.None));Assert.Equal(ScanStatus.Failed,(await db.Scans.FindAsync(interrupted.Id))!.Status);
+        var interrupted=await service.StartAsync(target.Id,null,CancellationToken.None);Assert.Equal(1,await service.RecoverInterruptedAsync(CancellationToken.None));Assert.Equal(ScanStatus.Failed,(await db.Scans.FindAsync(interrupted.Id))!.Status);
     }
 
     private static ScanService Service(QaAutomationDbContext db,IScanJobQueue queue)=>new(db,queue,TimeProvider.System,Options.Create(new ScannerOptions()));
