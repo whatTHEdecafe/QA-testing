@@ -28,6 +28,7 @@ secrets.json
 
 # Managed runtime data and logs
 app-data/*
+**/app-data/*
 !app-data/.gitkeep
 logs/
 *.log

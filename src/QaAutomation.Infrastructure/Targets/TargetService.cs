@@ -40,6 +40,9 @@ public sealed class TargetService(QaAutomationDbContext dbContext, TimeProvider 
     {
         var target = await dbContext.Targets.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (target is null) return false;
+        if (await dbContext.Scans.AnyAsync(x => x.TargetId == id, cancellationToken))
+            throw new DomainValidationException(new Dictionary<string, string[]>
+                { ["target"] = ["Targets with saved scan history cannot be deleted."] });
         dbContext.Targets.Remove(target);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;

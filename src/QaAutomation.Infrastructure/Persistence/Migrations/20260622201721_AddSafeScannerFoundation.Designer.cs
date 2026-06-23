@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using QaAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using QaAutomation.Infrastructure.Persistence;
 namespace QaAutomation.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(QaAutomationDbContext))]
-    partial class QaAutomationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260622201721_AddSafeScannerFoundation")]
+    partial class AddSafeScannerFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
