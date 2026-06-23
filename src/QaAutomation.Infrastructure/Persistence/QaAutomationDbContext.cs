@@ -34,13 +34,16 @@ public sealed class QaAutomationDbContext(DbContextOptions<QaAutomationDbContext
         scan.Property(x => x.BrowserName).HasMaxLength(50); scan.Property(x => x.FailureSummary).HasMaxLength(2000); scan.Property(x => x.CancellationReason).HasMaxLength(500);
         scan.HasOne(x => x.Target).WithMany().HasForeignKey(x => x.TargetId).OnDelete(DeleteBehavior.Restrict);
         scan.HasIndex(x => x.TargetId); scan.HasIndex(x => x.Status); scan.HasIndex(x => x.RequestedAtUtc); scan.HasIndex(x => new { x.TargetId, x.Status });
+        scan.HasIndex(x => x.PageTitle); scan.HasIndex(x => new { x.Status, x.RequestedAtUtc });
 
         var page = modelBuilder.Entity<ScannedPage>();
         page.ToTable("ScannedPages"); page.HasKey(x => x.Id);
         page.Property(x => x.OriginalUrl).HasMaxLength(2048); page.Property(x => x.FinalUrl).HasMaxLength(2048); page.Property(x => x.Route).HasMaxLength(2048);
         page.Property(x => x.OriginalPageTitle).HasMaxLength(500); page.Property(x => x.MainHeading).HasMaxLength(500); page.Property(x => x.GeneratedDisplayName).HasMaxLength(500);
+        page.Property(x => x.UserDisplayName).HasMaxLength(500);
         page.Property(x => x.ScreenshotPath).HasMaxLength(500); page.Property(x => x.ThumbnailPath).HasMaxLength(500);
         page.HasOne(x => x.Scan).WithMany(x => x.Pages).HasForeignKey(x => x.ScanId).OnDelete(DeleteBehavior.Cascade); page.HasIndex(x => new { x.ScanId, x.DiscoveryOrder });
+        page.HasIndex(x => x.UserDisplayName); page.HasIndex(x => x.ReviewUpdatedAtUtc);
 
         var element = modelBuilder.Entity<DetectedElement>();
         element.ToTable("DetectedElements"); element.HasKey(x => x.Id);
@@ -48,7 +51,10 @@ public sealed class QaAutomationDbContext(DbContextOptions<QaAutomationDbContext
         element.Property(x => x.AccessibleName).HasMaxLength(1000); element.Property(x => x.VisibleText).HasMaxLength(2000); element.Property(x => x.AssociatedLabel).HasMaxLength(1000);
         element.Property(x => x.Placeholder).HasMaxLength(1000); element.Property(x => x.NameAttribute).HasMaxLength(500); element.Property(x => x.HtmlId).HasMaxLength(500); element.Property(x => x.TestId).HasMaxLength(500);
         element.Property(x => x.Classification).HasConversion<string>().HasMaxLength(64); element.Property(x => x.CropPath).HasMaxLength(500); element.Property(x => x.ScreenshotError).HasMaxLength(2000);
+        element.Property(x => x.UserDisplayName).HasMaxLength(500); element.Property(x => x.ClassificationOverride).HasConversion<string>().HasMaxLength(64);
         element.HasOne(x => x.Page).WithMany(x => x.Elements).HasForeignKey(x => x.PageId).OnDelete(DeleteBehavior.Cascade); element.HasIndex(x => new { x.PageId, x.DiscoveryOrder });
+        element.HasOne(x => x.ManualPreferredSelectorCandidate).WithMany().HasForeignKey(x => x.ManualPreferredSelectorCandidateId).OnDelete(DeleteBehavior.NoAction);
+        element.HasIndex(x => x.UserDisplayName); element.HasIndex(x => x.ClassificationOverride); element.HasIndex(x => x.IsPotentiallyDestructive); element.HasIndex(x => x.ManualPreferredSelectorCandidateId);
 
         var selector = modelBuilder.Entity<SelectorCandidate>();
         selector.ToTable("SelectorCandidates"); selector.HasKey(x => x.Id); selector.Property(x => x.SelectorType).HasMaxLength(50); selector.Property(x => x.SelectorValue).HasMaxLength(2000); selector.Property(x => x.Confidence).HasPrecision(5, 4);
@@ -58,5 +64,6 @@ public sealed class QaAutomationDbContext(DbContextOptions<QaAutomationDbContext
         diagnostic.ToTable("ScanDiagnostics"); diagnostic.HasKey(x => x.Id); diagnostic.Property(x => x.Category).HasConversion<string>().HasMaxLength(64); diagnostic.Property(x => x.Severity).HasConversion<string>().HasMaxLength(32);
         diagnostic.Property(x => x.Message).HasMaxLength(4000); diagnostic.Property(x => x.Url).HasMaxLength(2048); diagnostic.Property(x => x.Method).HasMaxLength(20);
         diagnostic.HasOne(x => x.Scan).WithMany(x => x.Diagnostics).HasForeignKey(x => x.ScanId).OnDelete(DeleteBehavior.Cascade); diagnostic.HasIndex(x => new { x.ScanId, x.CreatedAtUtc });
+        diagnostic.HasIndex(x => new { x.ScanId, x.Category }); diagnostic.HasIndex(x => new { x.ScanId, x.Severity }); diagnostic.HasIndex(x => x.StatusCode);
     }
 }

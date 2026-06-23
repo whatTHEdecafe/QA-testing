@@ -15,7 +15,7 @@ public sealed class ScansControllerTests
     {
         var service=new StubScanService();await using var db=new QaAutomationDbContext(new DbContextOptionsBuilder<QaAutomationDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var controller=new ScansController(service,db,new ManagedArtifactStorage(Options.Create(new ScannerOptions{ScreenshotDirectory=Path.GetTempPath()})));
-        var result=await controller.Start(Guid.NewGuid(),CancellationToken.None);var accepted=Assert.IsType<AcceptedAtActionResult>(result.Result);Assert.Equal(nameof(ScansController.Get),accepted.ActionName);Assert.IsType<StartScanResponse>(accepted.Value);
+        var result=await controller.Start(Guid.NewGuid(),null,CancellationToken.None);var accepted=Assert.IsType<AcceptedAtActionResult>(result.Result);Assert.Equal(nameof(ScansController.Get),accepted.ActionName);Assert.IsType<StartScanResponse>(accepted.Value);
     }
 
     [Fact]
@@ -67,11 +67,17 @@ public sealed class ScansControllerTests
         private readonly CancelScanResponse _cancelResponse;
         public StubScanService():this(new CancelScanResponse(ScanCancellationOutcome.NotCancellable,null,"Scan cannot be cancelled.")){}
         public StubScanService(CancelScanResponse cancelResponse)=>_cancelResponse=cancelResponse;
-        public Task<StartScanResponse> StartAsync(Guid targetId,CancellationToken token)=>Task.FromResult(new StartScanResponse(Guid.NewGuid(),ScanStatus.Queued,"Waiting"));
-        public Task<IReadOnlyList<ScanSummaryResponse>> ListAsync(int limit,CancellationToken token)=>Task.FromResult<IReadOnlyList<ScanSummaryResponse>>([]);
+        public Task<StartScanResponse> StartAsync(Guid targetId,StartScanRequest? request,CancellationToken token)=>Task.FromResult(new StartScanResponse(Guid.NewGuid(),ScanStatus.Queued,"Waiting"));
+        public Task<PagedResponse<ScanSummaryResponse>> ListAsync(ScanHistoryQuery query,CancellationToken token)=>Task.FromResult(new PagedResponse<ScanSummaryResponse>([],1,25,0));
         public Task<ScanDetailsResponse?> GetAsync(Guid id,CancellationToken token)=>Task.FromResult<ScanDetailsResponse?>(null);
+        public Task<PagedResponse<ElementResponse>> QueryElementsAsync(Guid scanId,ElementQuery query,CancellationToken token)=>Task.FromResult(new PagedResponse<ElementResponse>([],1,25,0));
+        public Task<PagedResponse<DiagnosticResponse>> QueryDiagnosticsAsync(Guid scanId,DiagnosticQuery query,CancellationToken token)=>Task.FromResult(new PagedResponse<DiagnosticResponse>([],1,25,0));
+        public Task<PageResponse?> UpdatePageReviewAsync(Guid scanId,Guid pageId,UpdatePageReviewRequest request,CancellationToken token)=>Task.FromResult<PageResponse?>(null);
+        public Task<ElementResponse?> UpdateElementReviewAsync(Guid scanId,Guid elementId,UpdateElementReviewRequest request,CancellationToken token)=>Task.FromResult<ElementResponse?>(null);
+        public Task<ElementResponse?> SelectManualSelectorAsync(Guid scanId,Guid elementId,SelectManualSelectorRequest request,CancellationToken token)=>Task.FromResult<ElementResponse?>(null);
         public Task<CancelScanResponse> CancelAsync(Guid id,CancellationToken token)=>Task.FromResult(_cancelResponse);
         public Task<ScanDashboardSummary> GetDashboardSummaryAsync(CancellationToken token)=>Task.FromResult(new ScanDashboardSummary(0,null,null));
+        public Task<ScannerSettingsMetadata> GetSettingsMetadataAsync(CancellationToken token)=>Task.FromResult(new ScannerSettingsMetadata(new(120,10,600),new(30000,1000,120000),new(10000,500,60000),new(150,1,500),new(250,0,1000),new(8,0,40),new(1440,320,3840),new(900,320,2160),[]));
         public Task<int> RecoverInterruptedAsync(CancellationToken token)=>Task.FromResult(0);
     }
 }
